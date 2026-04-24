@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+
+# Model weights and checkpoints
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+runs/
+
+# HuggingFace cache (downloads to ~/.cache by default but just in case)
+*.arrow
+*.parquet
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Benchmark outputs (keep .md reports, ignore raw data files)
+benchmarks/*.json
+benchmarks/*.csv
+
+# Logs
+*.log
+logs/
+
+# Triton / CUDA cache
+.triton/
+
+# Claude Code
+CLAUDE.md
