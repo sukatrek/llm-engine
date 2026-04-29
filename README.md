@@ -1,4 +1,4 @@
 # llm-engine
 
-Production LLM inference engine built from scratch.
-Work in progress.
+building an LLM inference engine from scratch
+work in progress.
