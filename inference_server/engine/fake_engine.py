@@ -1,7 +1,6 @@
 import torch
 from scheduler.sequence import SequenceState
 
-
 class FakeEngine:
     def __init__(self, hf_model_name, device):
         self.device = device
@@ -20,7 +19,25 @@ class FakeEngine:
             s.num_processed_tokens += 1
             if s.num_processed_tokens == s.max_gen_tokens:
                 s.state = SequenceState.FINISHED
-            elif s.state == SequenceState.PREFILL:
+            elif s.num_processed_tokens >= len(s.prompt_tokens):
                 s.state = SequenceState.DECODE
-
         return
+
+    def evict_finished(self, sequences, cache=None):
+        """
+        Remove finished sequences from the live cache (in place) and return
+        the remaining sequences in the same relative order.
+
+        Indices are recomputed fresh from `sequences` every call — never
+        cached across steps, since eviction shifts every later position.
+        """
+        remaining_indices = [
+            i for i, s in enumerate(sequences)
+            if s.state != SequenceState.FINISHED
+        ]
+        remaining_sequences = [sequences[i] for i in remaining_indices]
+
+        if cache is not None and len(remaining_indices) < len(sequences):
+            cache.batch_select_indices(torch.tensor(remaining_indices))
+
+        return remaining_sequences

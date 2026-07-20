@@ -24,6 +24,8 @@ class Engine:
                 else:
                     outputs = self.model(input_ids=new_token, past_key_values=past_kv, use_cache=True)
                 past_kv = outputs.past_key_values
+                import inspect
+                print(inspect.getsource(past_kv.batch_select_indices))
                 new_token = torch.argmax(outputs.logits[:, -1, :], dim=-1).unsqueeze(1)
                 generated_ids = torch.cat([generated_ids, new_token], dim=1)
 
