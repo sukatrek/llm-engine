@@ -14,6 +14,7 @@ class Engine:
     def forward_pass(self, batch_dict, max_gen_toks=50) -> list:
         prompt_ids = batch_dict["input_ids"]
         generated_ids = prompt_ids
+        attention_mask = batch_dict["attention_mask"]
         past_kv = None
         new_token = None
 
@@ -22,10 +23,19 @@ class Engine:
                 if i == 0:
                     outputs = self.model(**batch_dict, past_key_values=past_kv, use_cache=True)
                 else:
-                    outputs = self.model(input_ids=new_token, past_key_values=past_kv, use_cache=True)
+                    # extend the mask by one column of 1s for the new token —
+                    # every prior column (real tokens + original padding) keeps its value
+                    attention_mask = torch.cat(
+                        [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device, dtype=attention_mask.dtype)],
+                        dim=1,
+                    )
+                    outputs = self.model(
+                        input_ids=new_token,
+                        attention_mask=attention_mask,
+                        past_key_values=past_kv,
+                        use_cache=True,
+                    )
                 past_kv = outputs.past_key_values
-                import inspect
-                print(inspect.getsource(past_kv.batch_select_indices))
                 new_token = torch.argmax(outputs.logits[:, -1, :], dim=-1).unsqueeze(1)
                 generated_ids = torch.cat([generated_ids, new_token], dim=1)
 
@@ -74,14 +84,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
