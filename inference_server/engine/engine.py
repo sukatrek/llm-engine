@@ -36,6 +36,8 @@ class Engine:
                         use_cache=True,
                     )
                 past_kv = outputs.past_key_values
+                print(type(past_kv.layers[0]))
+                print([a for a in dir(past_kv.layers[0]) if not a.startswith('_')])
                 new_token = torch.argmax(outputs.logits[:, -1, :], dim=-1).unsqueeze(1)
                 generated_ids = torch.cat([generated_ids, new_token], dim=1)
 

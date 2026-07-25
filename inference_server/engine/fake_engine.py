@@ -19,8 +19,9 @@ class FakeEngine:
             s.num_processed_tokens += 1
             if s.num_processed_tokens == s.max_gen_tokens:
                 s.state = SequenceState.FINISHED
-            elif s.num_processed_tokens >= len(s.prompt_tokens):
+            elif s.num_processed_tokens >= len(s.prompt_tokens) and s.state == SequenceState.PREFILL:
                 s.state = SequenceState.DECODE
+                s.num_processed_tokens = 0
         return
 
     def evict_finished(self, sequences, cache=None):
