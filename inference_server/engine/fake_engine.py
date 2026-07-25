@@ -1,13 +1,13 @@
 import torch
+import torch.nn.functional as F
+from collections import deque
 from scheduler.sequence import SequenceState
 
 class FakeEngine:
-    def __init__(self, hf_model_name, device):
+    def __init__(self, model, tokenizer, device):
         self.device = device
-        self.tokenizer = None
-        self.model = hf_model_name
-        # self.tokenizer.padding_side = "left"
-        # self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer = tokenizer
+        self.model = model
 
     #simulate predicting the next token for a batch
     def step(self, sequences) -> None:
@@ -65,7 +65,7 @@ class FakeEngine:
 
         return admitted, remaining_queue
 
-    def prefill_batch(self, sequences, model, tokenizer, device):
+    def prefill_batch(self, sequences):
         """
         Run one forward pass over the newly-admitted sequences together as
         their own mini-batch (own left-padding, own attention mask — this
@@ -83,14 +83,14 @@ class FakeEngine:
         against the main batch and concatenating.
         """
         prompts = [s.prompt for s in sequences]
-        batch_dict = tokenizer(
+        batch_dict = self.tokenizer(
             prompts,
             return_tensors="pt",
             padding=True,
-        ).to(device)
+        ).to(self.device)
 
         with torch.no_grad():
-            outputs = model(**batch_dict, use_cache=True)
+            outputs = self.model(**batch_dict, use_cache=True)
 
         for i, s in enumerate(sequences):
             s.state = SequenceState.PREFILL  # brief, resolves immediately below — kept for observability/logging, not correctness
@@ -98,3 +98,103 @@ class FakeEngine:
             s.state = SequenceState.DECODE
 
         return outputs.past_key_values, batch_dict["attention_mask"]
+
+    def merge_into_batch(self, batch_cache, batch_mask, running_max, new_cache, new_mask):
+        """
+        Pad whichever side (existing batch vs. newly-prefilled admits) has
+        the shorter seq_len up to match the other, left-padding both cache
+        and mask together (never one without the other — a padded cache
+        position with no matching mask entry is silently wrong, not just
+        differently shaped). Then concatenate along the batch axis.
+
+        batch_cache/batch_mask may be None on the very first admission
+        (nothing running yet) — in that case the new admits simply become
+        the batch outright, no padding or concat needed.
+
+        Returns: (merged_cache, merged_mask, new_running_max)
+        """
+        new_seq_len = new_mask.shape[1]
+
+        if batch_cache is None:
+            return new_cache, new_mask, new_seq_len
+
+        if new_seq_len == running_max:
+            pad_batch, pad_new = 0, 0
+        elif new_seq_len > running_max:
+            pad_batch, pad_new = new_seq_len - running_max, 0
+        else:
+            pad_batch, pad_new = 0, running_max - new_seq_len
+
+        new_running_max = max(running_max, new_seq_len)
+
+        if pad_batch > 0:
+            for layer in batch_cache.layers:
+                layer.keys = F.pad(layer.keys, (0, 0, pad_batch, 0), value=0.0)
+                layer.values = F.pad(layer.values, (0, 0, pad_batch, 0), value=0.0)
+            batch_mask = F.pad(batch_mask, (pad_batch, 0), value=0)
+
+        if pad_new > 0:
+            for layer in new_cache.layers:
+                layer.keys = F.pad(layer.keys, (0, 0, pad_new, 0), value=0.0)
+                layer.values = F.pad(layer.values, (0, 0, pad_new, 0), value=0.0)
+            new_mask = F.pad(new_mask, (pad_new, 0), value=0)
+
+        for batch_layer, new_layer in zip(batch_cache.layers, new_cache.layers):
+            batch_layer.keys = torch.cat([batch_layer.keys, new_layer.keys], dim=0)
+            batch_layer.values = torch.cat([batch_layer.values, new_layer.values], dim=0)
+        merged_mask = torch.cat([batch_mask, new_mask], dim=0)
+
+        return batch_cache, merged_mask, new_running_max
+
+
+class Scheduler:
+    """
+    Owns the persistent batch state (running_max, batch_cache, batch_mask,
+    the currently-running sequences, and the waiting queue) across steps.
+    One instance = one independent batch. FakeEngine's functions stay
+    stateless/reusable; this is where the state actually lives.
+    """
+
+    def __init__(self, engine: FakeEngine, max_batch_size):
+        self.engine = engine
+        self.max_batch_size = max_batch_size
+
+        self.sequences = []          # currently running (PREFILL/DECODE)
+        self.waiting_queue = deque() # WAITING, not yet admitted
+        self.batch_cache = None
+        self.batch_mask = None
+        self.running_max = 0
+
+    def add_request(self, sequence):
+        self.waiting_queue.append(sequence)
+
+    def step(self):
+        # 1. evict finished sequences from the live batch + cache
+        self.sequences = self.engine.evict_finished(self.sequences, self.batch_cache)
+
+        # 2. figure out open slots, admit waiting sequences to fill them
+        num_open_slots = self.max_batch_size - len(self.sequences)
+        admitted, self.waiting_queue = self.engine.admit_from_queue(self.waiting_queue, num_open_slots)
+
+        if admitted:
+            # 3. prefill the newly-admitted sequences as their own mini-batch
+            new_cache, new_mask = self.engine.prefill_batch(admitted)
+
+            # 4. pad + merge them into the main running batch
+            self.batch_cache, self.batch_mask, self.running_max = self.engine.merge_into_batch(
+                self.batch_cache, self.batch_mask, self.running_max, new_cache, new_mask
+            )
+            self.sequences.extend(admitted)
+
+        if not self.sequences:
+            return None  # nothing running — nothing to decode this step
+
+        # 5. run the normal decode step on the now-updated batch
+        # NOTE: FakeEngine.step() only simulates state advancement — no real
+        # model call, no batch_cache update. Real integration (porting into
+        # Engine) needs a genuine batched decode forward pass here. See
+        # concepts_log.md CHECKPOINT note.
+        self.engine.step(self.sequences)
+        self.running_max += 1
+
+        return self.sequences

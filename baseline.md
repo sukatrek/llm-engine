@@ -1,4 +1,4 @@
-## Week 1 — Static Batching (Prefill Only)
+## Static Batching (Prefill Only)
 - Model: Pythia-160m
 - Batch size: 6 chunks, seq_len=32
 - Avg latency: 44.39ms
@@ -7,7 +7,7 @@
 - Power: 211W / 300W
 
 
-## Week 2 — KV Cache
+## KV Cache
 - No KV cache: 473.85ms/batch, 677 seq/sec
 - With KV cache: 98.30ms/batch, 3265 seq/sec
 - Speedup: 4.8x

@@ -1,5 +1,5 @@
 """
-Validation for per-sequence KV cache slicing (Week 1 deliverable).
+Validation for per-sequence KV cache slicing.
 
 Proves: extracting one sequence's KV cache mid-generation, then continuing
 decode from ONLY that extracted cache, produces the same next token as
