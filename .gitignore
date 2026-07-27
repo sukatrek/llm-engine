@@ -57,3 +57,4 @@ logs/
 # Claude Code
 CLAUDE.md
 exercises/
+inference_server/docs/concepts_log.md
